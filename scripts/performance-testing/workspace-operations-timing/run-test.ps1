@@ -22,56 +22,82 @@
 # Usage:
 # IIf($condition, $ifTrue, $ifFalse)
 # IIf($condition, { $ifTrue }, { $ifFalse })
-Function IIf($If, $IfTrue, $IfFalse) {
-    If ($If) {If ($IfTrue -is "ScriptBlock") {&$IfTrue} Else {$IfTrue}}
-    Else {If ($IfFalse -is "ScriptBlock") {&$IfFalse} Else {$IfFalse}}
-}
+param(
+    [string]$bitVersion = "latest",
+    [int]$iterations = 1,
+    [string]$workspaceName = "__TEMP__bit-perf-test-workspace",
+    [string]$out = "stats-$bitVersion-$(Get-Date -Format 'yyy-ymm-dd.hh.mm.ss.fff').csv"
+)
 
-param($bitVersion)
-$bitVersion = IIf($bitVersion, $bitVersion, 'latest')
-$workspaceName = "__TEMP__bit-perf-test-workspace"
-
-Write-Host "Cleaning up"
-Remove-Item $workspaceName -Force -Recurse -ErrorAction Continue
-Write-Host "Done"
-
-Write-Host "Configuring requested version of bit v$bitVersion"
-bvm install $bitVersion
-bvm use $bitVersion
-Write-Host "Done."
-
-# The commands to run
 $commands = @(
     "bit new react $workspaceName && Set-Location $workspaceName",
-    # "bit import teambit.react/react --skip-dependency-installation",
     "bit install",
     "bit create react hello-world",
     "bit compile",
     "bit test"
     "bit build",
     "bit install && Set-Location .."
+
 )
-Write-Host "Running commands"
 
-# Run the commands and measure the time it took to run each one
 $stats = New-Object System.Data.DataTable # Used to ccollect run statistics
-$stats.Columns.Add("Sequence")
+$stats.Columns.Add("Id")
 $stats.Columns.Add("Operation")
-$stats.Columns.Add("Start Time")
-$stats.Columns.Add("End Time")
-$stats.Columns.Add("Elapsed Time")
-
-$seq = 1 # Used to number the commands in the output
-foreach ($command in $commands) {
-    $startedAt = Get-Date
-    Invoke-Expression "$command"
-    $endedAt = Get-Date
-    $elapsed = New-TimeSpan -Start $startedAt -End $endedAt
-    
-    $stats.Rows.Add($seq, $command, $startedAt, $endedAt, $elapsed.TotalMilliseconds)
-    $seq = $seq + 1
+for ($i = 0; $i -lt $iterations; $i++) {
+    $stats.Columns.Add("Seq_$($i+1)")
 }
 
-Write-Host 'Stats:.'
-$stats | Format-Table -AutoSize
-$stats | export-csv "$bitVersion.csv" -notypeinformation
+$i = 1
+foreach ($command in $commands) {
+    $stats.Rows.Add($i, $command)
+    $i = $i + 1
+}
+
+function setup() {
+    Write-Host "Configuring requested version of bit $bitVersion"
+    bvm install $bitVersion
+    bvm use $bitVersion
+    Write-Host "Done."
+}
+
+function run([int]$sequence) {
+    Write-Host "Cleaning up"
+    try {
+        Remove-Item $workspaceName -Force -Recurse -ErrorAction Stop
+    }
+    catch {
+    }
+    Write-Host "Done"
+
+    Write-Host "Running commands"
+    # Run the commands and measure the time it took to run each one 
+
+    $id = 1 # Used to number the commands in the output
+    foreach ($command in $commands) {
+        $startedAt = Get-Date
+        Invoke-Expression "$command"
+        $endedAt = Get-Date
+        $elapsed = New-TimeSpan -Start $startedAt -End $endedAt
+        
+        $stats | Where-Object { $_.Id -eq $id } | ForEach-Object { $_["Seq_$sequence"] = [math]::Round($elapsed.TotalMilliseconds, 0) }
+
+        # $stats.Rows.Add($seq, $command, $startedAt, $endedAt, $elapsed.TotalMilliseconds)
+        
+        $id = $id + 1
+    }
+}
+
+function report() {
+    Write-Host 'Stats:.'
+    $stats | Format-Table -AutoSize
+    $stats | export-csv $out -notypeinformation
+}
+
+
+setup
+for ($i = 0; $i -lt $iterations; $i++) {
+    run($i + 1)
+}
+report
+
+

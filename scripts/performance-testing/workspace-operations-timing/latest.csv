@@ -1,8 +1,0 @@
-"Sequence","Operation","Start Time","End Time","Elapsed Time"
-"1","bit new react __TEMP__bit-perf-test-workspace && Set-Location __TEMP__bit-perf-test-workspace","12/6/2022 10:42:10 AM","12/6/2022 10:42:20 AM","9701.898"
-"2","bit install","12/6/2022 10:42:20 AM","12/6/2022 10:42:22 AM","2064.66"
-"3","bit create react hello-world","12/6/2022 10:42:22 AM","12/6/2022 10:42:23 AM","1411.871"
-"4","bit compile","12/6/2022 10:42:23 AM","12/6/2022 10:42:24 AM","1267.296"
-"5","bit test","12/6/2022 10:42:24 AM","12/6/2022 10:42:27 AM","2462.435"
-"6","bit build","12/6/2022 10:42:27 AM","12/6/2022 10:42:34 AM","7267.56"
-"7","bit install && Set-Location ..","12/6/2022 10:42:34 AM","12/6/2022 10:42:38 AM","3420.858"
