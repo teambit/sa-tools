@@ -18,10 +18,6 @@
 # - The script will output the time it took to run each command.
 # - The script will NOT delete the workspace folder after the test is done. This is to allow you to inspect the workspace after the test is done.
 
-# Inline If function
-# Usage:
-# IIf($condition, $ifTrue, $ifFalse)
-# IIf($condition, { $ifTrue }, { $ifFalse })
 param(
     [string]$bitVersion = "latest",
     [int]$iterations = 1,
@@ -30,14 +26,14 @@ param(
 )
 
 $commands = @(
-    "bit new react $workspaceName && Set-Location $workspaceName",
+    "bit new ng-workspace Tempws2 -a teambit.angular/angular"
+    "cd Tempws2"
     "bit install",
-    "bit create react hello-world",
+    "bit create ng-module hello-world",
     "bit compile",
     "bit test"
     "bit build",
     "bit install && Set-Location .."
-
 )
 
 $stats = New-Object System.Data.DataTable # Used to ccollect run statistics
