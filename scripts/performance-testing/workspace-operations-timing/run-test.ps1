@@ -10,90 +10,193 @@
 #    .\run-test.ps1 0.0.888
 # 3. The results will be printed to the terminal
 
-# Notes: 
-# - PowerShell version 7.0.0 or above is required.
-# - The script will delete the workspace folder if it exists before running the test.
-# - The script will install the requested version of Bit using bvm.
-# - The script will run the commands in the order they are defined in the $commands array.
-# - The script will output the time it took to run each command.
-# - The script will NOT delete the workspace folder after the test is done. This is to allow you to inspect the workspace after the test is done.
+#params:
+# $bitVersion - The version of Bit to test.
+#               Defaults to 0.1.11
+# $iterations - The number of times to run each command.
+#               Defaults to 5
+# $framework -  The framework to use (react or angular).
+#               Defaults to react
+#
+# Example (all arguments have to be provided in the same order):
+# .\run-test.ps1 0.0.888 5 react
+# .\run-test.ps1 0.0.888 5 angular
+
+# or with named parameters (order of the parameters does not matter):
+# .\run-test.ps1 -bitVersion 0.0.888 -iterations 5 -framework react
+# .\run-test.ps1 -bitVersion 0.0.888 -iterations 5 -framework angular
+
 
 param(
-    [string]$bitVersion = "latest",
-    [int]$iterations = 1,
-    [string]$workspaceName = "__TEMP__bit-perf-test-workspace",
-    [string]$out = "stats-$bitVersion-$(Get-Date -Format 'yyy-ymm-dd.hh.mm.ss.fff').csv"
+    [string]$bitVersion = "0.1.11",
+    [int]$iterations = 5,
+    [string]$framework = "react"
 )
 
-$commands = @(
-    "bit new ng-workspace Tempws2 -a teambit.angular/angular"
-    "cd Tempws2"
-    "bit install",
-    "bit create ng-module hello-world",
-    "bit compile",
-    "bit test"
-    "bit build",
-    "bit install && Set-Location .."
-)
-
-$stats = New-Object System.Data.DataTable # Used to ccollect run statistics
-$stats.Columns.Add("Id")
-$stats.Columns.Add("Operation")
-for ($i = 0; $i -lt $iterations; $i++) {
-    $stats.Columns.Add("Seq_$($i+1)")
+$script:stats = New-Object System.Data.DataTable # Used to ccollect run statistics
+function getDeletedWorkspaceName() {
+    return "ws-$framework-$([guid]::NewGuid())"
 }
 
-$i = 1
-foreach ($command in $commands) {
-    $stats.Rows.Add($i, $command)
-    $i = $i + 1
+function getCsvFileName() {
+    return $script:csvFileName
+}
+
+function getLogFileName() {
+    return $script:logFileName
+}
+
+# The commands to run for react
+function getReactCommands() {
+    return @(
+        "bit new react ${script:workspaceName} --aspect teambit.react/react-env --default-scope test-org.test-scope",
+        "cd ./${script:workspaceName}",
+        "bit install",
+        "bit compile",
+        "bit status",
+        "bit create react my-button",
+        "bit create react my-button2",
+        "bit create react my-button3",
+        "bit install", # BUG: will not work without this install
+        "bit compile",
+        "bit status",
+        "bit install",
+        "bit lint",
+        "bit test",
+        "bit build",
+        "bit tag",
+        "bit remove my-button -s",
+        "bit -h",
+        "cd .."
+    )
+}
+
+# The commands to run for angular
+function getAngularCommands() {
+    return @(    
+        # "bit new angular ${script:workspaceName} --env teambit.angular/angular --default-scope test-org.test-scope",
+        "bit new angular ${script:workspaceName}  --aspect teambit.angular/angular --default-scope test-org.test-scope",
+        "cd ./${script:workspaceName}",
+        "bit install",
+        "bit compile",
+        "bit create angular my-button",
+        "bit create angular my-button2",
+        "bit create angular my-button3",
+        "bit compile",
+        "bit status",
+        "bit install",
+        "bit lint",
+        "bit test",
+        "bit build",
+        "bit tag",
+        "bit remove org.scope-name/my-button -s",
+        "bit -h",
+        "cd .."
+    )
+}
+
+# The commands to run
+# The commands are defined as a function so that we can return different commands for different frameworks
+function getCommands() {
+    if ($framework -eq "react") {
+        return getReactCommands
+    }
+    if ($framework -eq "angular") {
+        return getAngularCommands
+    }
+}
+
+function initStatsTable() {
+    $script:stats.Columns.Add("Id")
+    $script:stats.Columns.Add("Framework")
+    $script:stats.Columns.Add("Version")
+    $script:stats.Columns.Add("Device")
+    $script:stats.Columns.Add("Command")
+    for ($i = 0; $i -lt $iterations; $i++) {
+        $script:stats.Columns.Add("Seq_$($i+1) seconds")
+    }
+
+    $i = 1
+    foreach ($command in $script:commands) {
+        $script:stats.Rows.Add($i, $framework, $bitVersion, "", $command)
+        $i = $i + 1
+    }
+
+    $script:stats | Format-Table -AutoSize
+}
+
+function writeLog([string]$message) {
+    # writeLog $messageconst 
+    $timeStamp = "[{0:MM/dd/yy} {0:HH:mm:ss}]" -f (Get-Date)
+
+    Write-OutPut "$timeStamp $message" | Out-File -Append -FilePath $(getLogFileName)
+    Write-Host $message
+}
+function report() {
+    writeLog 'Stats:.'
+
+    $script:stats | Format-Table -AutoSize
+    $script:stats | export-csv $(getCsvFileName) -notypeinformation
+
+    writeLog $script:stats
+    writeLog 'Done with Stats.'
 }
 
 function setup() {
-    Write-Host "Configuring requested version of bit $bitVersion"
-    bvm install $bitVersion
-    bvm use $bitVersion
-    Write-Host "Done."
+    if (!(Test-Path "./$script:deleted")) {
+        writeLog "Creating deleted folder"
+        New-Item $script:deleted -ItemType Directory -Force
+    }
+
+    # Remove the BIT_FEATURES env variable if it exists to force local toolchain execution
+    Remove-Item Env:\BIT_FEATURES
+
+    writeLog "Initializing stats table"
+    initStatsTable
+    
+    writeLog "Configuring requested version of bit $bitVersion"
+    npx bvm install $bitVersion
+    npx bvm use $bitVersion
+    writeLog "Done."
+}
+
+function cleanUp() {
+    If (Test-Path "./${script:workspaceName}") {
+        writeLog pwd
+        writeLog "Deleting workspace folder"
+        Move-Item "./${script:workspaceName}" "./$deleted/$([guid]::NewGuid())" 
+    }
+    writeLog "Done"
 }
 
 function run([int]$sequence) {
-    Write-Host "Cleaning up"
-    try {
-        Remove-Item $workspaceName -Force -Recurse -ErrorAction Stop
-    }
-    catch {
-    }
-    Write-Host "Done"
-
-    Write-Host "Running commands"
-    # Run the commands and measure the time it took to run each one 
-
     $id = 1 # Used to number the commands in the output
-    foreach ($command in $commands) {
+    foreach ($command in $script:commands) {
+        writeLog "Running $command"
         $startedAt = Get-Date
-        Invoke-Expression "$command"
+        Invoke-Expression $command
         $endedAt = Get-Date
         $elapsed = New-TimeSpan -Start $startedAt -End $endedAt
         
-        $stats | Where-Object { $_.Id -eq $id } | ForEach-Object { $_["Seq_$sequence"] = [math]::Round($elapsed.TotalMilliseconds, 0) }
-
-        # $stats.Rows.Add($seq, $command, $startedAt, $endedAt, $elapsed.TotalMilliseconds)
-        
+        $script:stats | Where-Object { $_.Id -eq $id } | ForEach-Object { $_["Seq_$sequence seconds"] = $elapsed.TotalMilliseconds / 1000 }
+        report
         $id = $id + 1
     }
 }
 
-function report() {
-    Write-Host 'Stats:.'
-    $stats | Format-Table -AutoSize
-    $stats | export-csv $out -notypeinformation
-}
 
+$script:workspaceName = "test-workspace"
+$script:baseDir = $(Get-Location)
+$script:scriptStartedAt = Get-Date -Format 'yyyy-MM-dd_hh.mm.ss.fff'
+$script:csvFileName = "${script:baseDir}/${script:scriptStartedAt}.csv"
+$script:logFileName = "${script:baseDir}/${script:scriptStartedAt}.log"
+$script:deleted = "./deleted"
+$script:commands = getCommands
 
 setup
 for ($i = 0; $i -lt $iterations; $i++) {
     run($i + 1)
+    cleanUp
 }
 report
-
-
+cleanUp
